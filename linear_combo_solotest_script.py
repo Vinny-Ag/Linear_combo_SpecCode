@@ -39,9 +39,11 @@ Ha_to_eV=27.211396132
 # 				# of transition dipole moment derivative (Km/mol)^0.5
 # 				# to Debye/(ang amu*0.5) 
 
+spectral_window=6
+E_adiabatic = 2
 
 num_points = 4000
-n= 50
+n= 20
 n_max_gs = 20
 n_max_ex = 20
 
@@ -167,18 +169,18 @@ print('')
 
 
 def transition_energy(omega_ex,D_ex,omega_gs,D_gs,n):
-	E_gs=compute_Harm_eval_n(omega_gs,D_gs,n)*au_to_fs*hbar_in_eVfs
-	E_ex=compute_Harm_eval_n(omega_ex,D_ex,n)*au_to_fs*hbar_in_eVfs
-	return (E_ex-E_gs)+adiabatic*Ha_to_eV
+	E_gs=compute_Harm_eval_n(omega_gs,D_gs,n)
+	E_ex=compute_Harm_eval_n(omega_ex,D_ex,n)
+	return (E_ex-E_gs)+adiabatic
 
 print ('transition energy:',transition_energy(omega_ex,D_ex,omega_gs,D_gs,0))
 print('')
 
 def energy_distribution(alpha_gs,D_gs,alpha_ex,D_ex,mu,n):
-	max_abs = D_ex*Ha_to_eV-compute_Harm_eval_n(omega_ex,D_ex,0)*au_to_fs*hbar_in_eVfs+transition_energy(omega_ex,D_ex,omega_gs,D_gs,0)#(D_ex+adiabatic)*Ha_to_eV-compute_Harm_eval_n(omega_gs,D_gs,0)*au_to_fs*hbar_in_eVfs#largest possible excitation energy
+	max_abs = D_ex-compute_Harm_eval_n(omega_ex,D_ex,0)+transition_energy(omega_ex,D_ex,omega_gs,D_gs,0)#(D_ex+adiabatic)*Ha_to_eV-compute_Harm_eval_n(omega_gs,D_gs,0)*au_to_fs*hbar_in_eVfs#largest possible excitation energy
 	min_abs = transition_energy(omega_ex,D_ex,omega_gs,D_gs,0)#0-0 transition
-	vib_ex1 = compute_Harm_eval_n(omega_ex,D_ex,1)*au_to_fs*hbar_in_eVfs#+adiabatic*Ha_to_eV
-	vib_ex0 = compute_Harm_eval_n(omega_ex,D_ex,0)*au_to_fs*hbar_in_eVfs
+	vib_ex1 = compute_Harm_eval_n(omega_ex,D_ex,1)#+adiabatic*Ha_to_eV
+	vib_ex0 = compute_Harm_eval_n(omega_ex,D_ex,0)
 	'''doesnt take in to account the decrease in vibrational eigenvalue energy difference as state increases definitely a source of error 
 	can we add a decay rate???'''
 	E_vib=np.zeros(n)
@@ -188,17 +190,18 @@ def energy_distribution(alpha_gs,D_gs,alpha_ex,D_ex,mu,n):
 	E_trans = np.zeros(n)
 	E_range= np.zeros(num_points)
 	E_stepx = (max_abs-min_abs)/num_points
+
 	
 	#populate E_trans with vibronic transition energies
 	for i in range(n):
 		if i == 0:
 			E_trans[i]=min_abs+0 #the zero position 
 		else:
-			E_trans[i]=min_abs + i*E_vib[i]*au_to_fs*hbar_in_eVfs
+			E_trans[i]=min_abs + i*E_vib[i]
 	
 	#'populate E_range with energy grid over which to plot spectrum  (in eV)'
 	for i in range(num_points):
-		E_range[i] = (min_abs-(min_abs*0.1))+i*E_stepx #subtracted 10% from min_abs to capture full peak width
+		E_range[i] = (min_abs-(min_abs*.2))+i*E_stepx #subtracted 20% from min_abs to capture full peak width (min_abs-(min_abs*0.1))
 		
 	return E_trans,E_range
 
@@ -211,7 +214,7 @@ print ('')
 def gaussian_setup(alpha_gs,D_gs,alpha_ex,D_ex,mu,n):
 	E_range = energy_distribution(alpha_gs,D_gs,alpha_ex,D_ex,mu,n)[1]
 	E_trans = energy_distribution(alpha_gs,D_gs,alpha_ex,D_ex,mu,n)[0]
-	s = 0.01 #arbitrary gaussian SD, causes linewidth to change
+	s = 0.001 #arbitrary gaussian SD, causes linewidth to change
 	full_function = np.zeros((num_points,n))
 	for i in range(n):
 		for k in range(num_points):
@@ -241,8 +244,8 @@ def absorbance_correction(x_range,alpha_gs,D_gs,alpha_ex,D_ex,mu,n,shift_ex):
 	E_range = energy_distribution(alpha_gs,D_gs,alpha_ex,D_ex,mu,n)[1]
 	summed_function = plot_setup(x_range,alpha_gs,D_gs,alpha_ex,D_ex,mu,n,shift_ex)
 	adjusted_plot=np.zeros((summed_function.shape[0],1))
-	for i in range(E_range.shape[0]):
-		adjusted_plot[i]= summed_function[i]*2.7347#*40.0*math.pi**2.0*fine_struct*E_range[i]/(3.0*math.log(10.0))*2.7347
+	for i in range(num_points):
+		adjusted_plot[i]= summed_function[i]*2.7347*E_range[i]*Ha_to_eV#*40.0*math.pi**2.0*fine_struct*E_range[i]/(3.0*math.log(10.0))*2.7347
 	return adjusted_plot
 
 
@@ -253,7 +256,7 @@ print('plot_ready_func:',plot_ready_function.shape)
 
 def write_output(plot_ready_function,E_range):
 	spectrum_file = open('./Linear_combo.out', 'w')
-	xarray = np.array(E_range)
+	xarray = np.array(E_range*Ha_to_eV)
 	yarray = np.array(plot_ready_function)
 	data = np.column_stack([xarray,yarray])
 	np.savetxt(spectrum_file,data,fmt=['%10.10f','%10.10f'])
@@ -263,7 +266,7 @@ def write_output(plot_ready_function,E_range):
 my_file = write_output(plot_ready_function,E_range)
 
 
-plt.plot(E_range,plot_ready_function)
+plt.plot(E_range*Ha_to_eV,plot_ready_function)
 plt.xlabel("Energy (eV)")
 plt.ylabel("Intensity (arb.)")
 plt.show()
