@@ -181,7 +181,7 @@ def LC_coefficients(x_range,omega_gs,omega_ex,mu,n,shift):
 
 coefficients = LC_coefficients(x_range,omega_gs,omega_ex,mu,n,shift_ex)
 print('coefficients:',coefficients)
-print('coefficients sum SQ:',sum(coefficients))
+print('coefficients sum SQ:',sum(coefficients**2))
 print('')
 
 
