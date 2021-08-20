@@ -126,6 +126,35 @@ x_range = np.arange(start_point,end_point,step_x)
 omega_gs = mode_freq(alpha_gs,D_gs,alpha_ex,D_ex,mu)[0]
 omega_ex = mode_freq(alpha_gs,D_gs,alpha_ex,D_ex,mu)[1]
 
+def Morse_wavefunc(num_points,start_point,end_point,D,alpha,mu,n,shift):
+        # first start by filling array with position points:
+        wavefunc=np.zeros((num_points,2))
+        lamda=math.sqrt(2.0*D*mu)/(alpha)
+        step_x=(end_point-start_point)/num_points
+        denom=special.gamma(2.0*lamda-n)
+        if np.isinf(denom):
+                denom=10e280
+        num=(math.factorial(n)*(2.0*lamda-2.0*n-1.0))
+        normalization=math.sqrt(num/denom)
+        counter=0
+        for x in wavefunc:
+                x[0]=start_point+counter*step_x
+                r_val=(start_point+counter*step_x)*alpha
+                r_shift_val=(shift)*alpha
+                z_val=2.0*lamda*math.exp(-(r_val-r_shift_val))
+                func_val=normalization*z_val**(lamda-n-0.5)*math.exp(-0.5*z_val)*special.assoc_laguerre(z_val,n,2.0*lamda-2.0*n-1.0)
+                x[1]=func_val
+                counter=counter+1
+
+	# fix normalization regardless of value of denominator to avoid rounding errors
+        wavefunc_sq=np.zeros(wavefunc.shape[0])
+        wavefunc_sq[:]=wavefunc[:,1]*wavefunc[:,1]
+        normalization=integrate.simps(wavefunc_sq,dx=step_x)
+        for counter in range(wavefunc.shape[0]):
+                wavefunc[counter,1]=wavefunc[counter,1]/math.sqrt(normalization)
+
+        return wavefunc
+
 def psi_func(x_range,omega,mu,n,shift):
 	wavefunc=((num_points,2))
 	r_val=x_range*(math.sqrt(mu*omega))
@@ -144,11 +173,11 @@ print('psi_shape',np.shape(psi_func(x_range,omega_gs,mu,4,shift_ex)))
 
 
 def LC_coefficients(x_range,omega_gs,omega_ex,mu,n,shift):
-	psi_O = psi_func(x_range,omega_gs,mu,0,0)
+	psi_O = Morse_wavefunc(num_points,start_point,end_point,D_gs,alpha_gs,mu,0,0)
 	LC_coeffs = np.zeros(n+1)
 	for i in range(n+1):
-		LC_coeffs[i] = integrate.simps(psi_func(x_range,omega_gs,mu,i,shift)*psi_O,x_range,dx=step_x)
-	return LC_coeffs**2
+		LC_coeffs[i] = integrate.simps(psi_func(x_range,omega_gs,mu,i,shift)*psi_O[:,1],x_range,dx=step_x)
+	return LC_coeffs
 
 coefficients = LC_coefficients(x_range,omega_gs,omega_ex,mu,n,shift_ex)
 print('coefficients:',coefficients)
@@ -231,7 +260,7 @@ def plot_setup(x_range,alpha_gs,D_gs,alpha_ex,D_ex,mu,n,shift):
 	overlap_function=np.zeros((num_points,n))
 	sumed_function = np.zeros((num_points,1))
 	for i in range(n):
-		overlap_function[:,i] = full_function[:,i]*overlap_coefs[i]
+		overlap_function[:,i] = full_function[:,i]*overlap_coefs[i]**2
 	print('overlap_func',overlap_function)
 # 	for i in range(num_points):
 # 		sumed_function[i] = sum(overlap_function[i,:])
