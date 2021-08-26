@@ -24,6 +24,8 @@ so if you use a single number it will only call H0 the zeroth polynomial'''
 # print('')
 # print('Coeff length:',len(coeff))
 
+
+
 fine_struct=0.0072973525693
 au_to_fs=41
 hbar_in_eVfs=0.6582119514
@@ -43,7 +45,11 @@ spectral_window=6
 E_adiabatic = 2
 
 num_points = 4000
-n= 20
+expansion_number=41 #the number of HO's used for the linear combination method
+n=30 #the number of Morse states to build with HO's
+gs_morse = 1 #number of gs Morse wavefunctions that will overlap with excited states, should be dependent on boltzmann distribution
+ex_morse = 41
+
 n_max_gs = 20
 n_max_ex = 20
 
@@ -126,6 +132,8 @@ x_range = np.arange(start_point,end_point,step_x)
 omega_gs = mode_freq(alpha_gs,D_gs,alpha_ex,D_ex,mu)[0]
 omega_ex = mode_freq(alpha_gs,D_gs,alpha_ex,D_ex,mu)[1]
 
+
+
 def Morse_wavefunc(num_points,start_point,end_point,D,alpha,mu,n,shift):
         # first start by filling array with position points:
         wavefunc=np.zeros((num_points,2))
@@ -172,29 +180,48 @@ print('psi',psi_func(x_range,omega_gs,mu,4,shift_ex))
 print('psi_shape',np.shape(psi_func(x_range,omega_gs,mu,4,shift_ex)))
 
 
-def LC_coefficients(x_range,omega_gs,omega_ex,mu,n,shift):
-	psi_O = Morse_wavefunc(num_points,start_point,end_point,D_gs,alpha_gs,mu,0,0)
-	LC_coeffs = np.zeros(n+1)
-	for i in range(n+1):
-		LC_coeffs[i] = integrate.simps(psi_func(x_range,omega_gs,mu,i,shift)*psi_O[:,1],x_range,dx=step_x)
+def LC_coefficients(x_range,omega,D,alpha,mu,n,expansion_number,shift):
+	morse_n = Morse_wavefunc(num_points,start_point,end_point,D,alpha,mu,n,shift)
+	LC_coeffs = np.zeros(expansion_number+1)
+	for i in range(expansion_number+1):
+		LC_coeffs[i] = integrate.simps(psi_func(x_range,omega_gs,mu,i,shift)*morse_n[:,1],x_range,dx=step_x)
 	return LC_coeffs
 
-coefficients = LC_coefficients(x_range,omega_gs,omega_ex,mu,n,shift_ex)
+coefficients = LC_coefficients(x_range,omega_gs,D_gs,alpha_gs,mu,0,expansion_number,0)
 print('coefficients:',coefficients)
 print('coefficients sum SQ:',sum(coefficients**2))
 print('')
 
-
-def Linear_combo_wfs(x_range,omega_gs,omega_ex,mu,n,shift):
-	coefficients=LC_coefficients(x_range,omega_gs,omega_ex,mu,n,shift)
+def Linear_combo_wfs(x_range,omega,D,alpha,mu,n,expansion_number,shift):
+	coefficients=LC_coefficients(x_range,omega,D,alpha,mu,n,expansion_number,shift)
 	LC_func = np.zeros((num_points,n+1))
 	for i in range (n+1):
-		LC_func[:,i]=psi_func(x_range,omega_gs,mu,i,0)*coefficients[i]
+		LC_func[:,i]=psi_func(x_range,omega,mu,i,shift)*coefficients[i]
 	#print(LC_func)
 	return LC_func.sum(axis=1)
 
-print('LC_func_total:',Linear_combo_wfs(x_range,omega_gs,omega_ex,mu,n,shift_ex))
+print('LC_func_total:',Linear_combo_wfs(x_range,omega_gs,D_gs,alpha_gs,mu,0,expansion_number,0))
 print('')
+
+
+#new function
+def LC_func_overlaps(x_range,omega_gs,omega_ex,D_ex,alpha_ex,D_gs,alpha_gs,mu,gs_morse,ex_morse,expansion_number,shift):
+	gs_LC_morse=np.zeros((num_points,gs_morse))
+	ex_LC_morse=np.zeros((num_points,ex_morse))
+	gs_ex_Mat=np.zeros((gs_morse,ex_morse))
+	for i in range(gs_morse):
+		gs_LC_morse[:,i] = Linear_combo_wfs(x_range,omega_gs,D_gs,alpha_gs,mu,i,expansion_number,0)
+	for j in range(ex_morse):
+		ex_LC_morse[:,j] = Linear_combo_wfs(x_range,omega_ex,D_ex,alpha_ex,mu,j,expansion_number,shift)
+	
+	for k in range(gs_morse):
+		for l in range(ex_morse):
+			gs_ex_Mat[k,l]=integrate.simps(gs_LC_morse[:,k]*ex_LC_morse[:,l],dx=step_x)
+	
+	return gs_ex_Mat
+
+
+print('MORSE LC OVERLAP MAT:', LC_func_overlaps(x_range,omega_gs,omega_ex,D_ex,alpha_ex,D_gs,alpha_gs,mu,gs_morse,ex_morse,expansion_number,shift_ex).shape)
 
 
 def transition_energy(omega_ex,D_ex,omega_gs,D_gs,n):
@@ -205,28 +232,29 @@ def transition_energy(omega_ex,D_ex,omega_gs,D_gs,n):
 print ('transition energy:',transition_energy(omega_ex,D_ex,omega_gs,D_gs,0))
 print('')
 
-def energy_distribution(alpha_gs,D_gs,alpha_ex,D_ex,mu,n):
+
+def energy_distribution(alpha_gs,D_gs,alpha_ex,D_ex,mu,gs_morse,ex_morse):
 	max_abs = D_ex-compute_Harm_eval_n(omega_ex,D_ex,0)+transition_energy(omega_ex,D_ex,omega_gs,D_gs,0)#(D_ex+adiabatic)*Ha_to_eV-compute_Harm_eval_n(omega_gs,D_gs,0)*au_to_fs*hbar_in_eVfs#largest possible excitation energy
 	min_abs = transition_energy(omega_ex,D_ex,omega_gs,D_gs,0)#0-0 transition
-	vib_ex1 = compute_Harm_eval_n(omega_ex,D_ex,1)#+adiabatic*Ha_to_eV
-	vib_ex0 = compute_Harm_eval_n(omega_ex,D_ex,0)
+# 	vib_ex1 = compute_Harm_eval_n(omega_ex,D_ex,1)#+adiabatic*Ha_to_eV
+# 	vib_ex0 = compute_Harm_eval_n(omega_ex,D_ex,0)
 	'''doesnt take in to account the decrease in vibrational eigenvalue energy difference as state increases definitely a source of error 
 	can we add a decay rate???'''
-	E_vib=np.zeros(n)
-	for i in range(n):
-		E_vib[i]= compute_Harm_eval_n(omega_ex,D_ex,i+1)-compute_Harm_eval_n(omega_ex,D_ex,i) #energy difference between two vibrational harmonic eigenstates
+	E_vib=np.zeros(gs_morse*ex_morse)
+	for i in range(gs_morse*ex_morse):
+		E_vib[i]= compute_Harm_eval_n(omega_ex,D_ex,i)-compute_Harm_eval_n(omega_ex,D_ex,0) #energy difference between two vibrational harmonic eigenstates
 	
-	E_trans = np.zeros(n)
+	E_trans = np.zeros(gs_morse*ex_morse)
 	E_range= np.zeros(num_points)
-	E_stepx = (max_abs-min_abs)/num_points
+	E_stepx = max_abs/num_points
 
 	
 	#populate E_trans with vibronic transition energies
-	for i in range(n):
+	for i in range(gs_morse*ex_morse):
 		if i == 0:
-			E_trans[i]=min_abs+0 #the zero position 
+			E_trans[i]=min_abs #the zero position 
 		else:
-			E_trans[i]=min_abs + i*E_vib[i]
+			E_trans[i]=min_abs + E_vib[i]
 	
 	#'populate E_range with energy grid over which to plot spectrum  (in eV)'
 	for i in range(num_points):
@@ -234,44 +262,56 @@ def energy_distribution(alpha_gs,D_gs,alpha_ex,D_ex,mu,n):
 		
 	return E_trans,E_range
 
-# E_range = energy_distribution(alpha_gs,D_gs,alpha_ex,D_ex,mu,n)[1]
-print ('E_range',energy_distribution(alpha_gs,D_gs,alpha_ex,D_ex,mu,n)[1])
-print('E_trans',energy_distribution(alpha_gs,D_gs,alpha_ex,D_ex,mu,n)[0])
+print('EIGENVALUE:',compute_Harm_eval_n(omega_ex,D_ex,40))
+
+#excited states
+#eigenvalues
+#EIGENVALUE_40: 0.19841586671955957
+#EIGENVALUE_28: 0.19265707369937785
+#EIGENVALUE_27: 0.1901613724845435
+#EIGENVALUE_25: 0.18423959999495831
+
+E_range = energy_distribution(alpha_gs,D_gs,alpha_ex,D_ex,mu,gs_morse,ex_morse)[1]
+print ('E_range',energy_distribution(alpha_gs,D_gs,alpha_ex,D_ex,mu,gs_morse,ex_morse)[1])
+print('E_trans',energy_distribution(alpha_gs,D_gs,alpha_ex,D_ex,mu,gs_morse,ex_morse)[0])
 print ('space here')
 print ('')
 
-def gaussian_setup(alpha_gs,D_gs,alpha_ex,D_ex,mu,n):
-	E_range = energy_distribution(alpha_gs,D_gs,alpha_ex,D_ex,mu,n)[1]
-	E_trans = energy_distribution(alpha_gs,D_gs,alpha_ex,D_ex,mu,n)[0]
+def gaussian_setup(alpha_gs,D_gs,alpha_ex,D_ex,mu,gs_morse,ex_morse):
+	E_range = energy_distribution(alpha_gs,D_gs,alpha_ex,D_ex,mu,gs_morse,ex_morse)[1]
+	E_trans = energy_distribution(alpha_gs,D_gs,alpha_ex,D_ex,mu,gs_morse,ex_morse)[0]
 	s = 0.001 #arbitrary gaussian SD, causes linewidth to change
-	full_function = np.zeros((num_points,n))
-	for i in range(n):
+	full_function = np.zeros((num_points,gs_morse*ex_morse))
+	for i in range(gs_morse*ex_morse):
 		for k in range(num_points):
 			full_function[k,i]=np.exp(-(E_range[k]-E_trans[i])**2/(2*s**2))
 
 	return full_function
 
-print('full_function:',gaussian_setup(alpha_gs,D_gs,alpha_ex,D_ex,mu,n))
-# plt.plot(gaussian_setup(alpha_gs,D_gs,alpha_ex,D_ex,mu,n)[:,0])
+# print('full_function:',gaussian_setup(alpha_gs,D_gs,alpha_ex,D_ex,mu,gs_morse,ex_morse))
+# plt.plot(x_range,gaussian_setup(alpha_gs,D_gs,alpha_ex,D_ex,mu,gs_morse,ex_morse)[:,40])
 
-def plot_setup(x_range,alpha_gs,D_gs,alpha_ex,D_ex,mu,n,shift):
-	full_function = gaussian_setup(alpha_gs,D_gs,alpha_ex,D_ex,mu,n)
-	overlap_coefs = LC_coefficients(x_range,omega_gs,omega_ex,mu,n,shift)
-	overlap_function=np.zeros((num_points,n))
+#FIX LINE 303 AND POSSIBLY RELATED TO THIS IS THE NESTED FORLOOP IN LINES 285-287
+###########################################################################################################################################
+def plot_setup(x_range,alpha_gs,D_gs,alpha_ex,D_ex,mu,gs_morse,ex_morse,expansion_number,shift):
+	full_function = gaussian_setup(alpha_gs,D_gs,alpha_ex,D_ex,mu,gs_morse,ex_morse)
+	overlap_coefs = LC_func_overlaps(x_range,omega_gs,omega_ex,D_ex,alpha_ex,D_gs,alpha_gs,mu,gs_morse,ex_morse,expansion_number,shift)
+	overlap_function=np.zeros((num_points,gs_morse*ex_morse))
 	sumed_function = np.zeros((num_points,1))
-	for i in range(n):
-		overlap_function[:,i] = full_function[:,i]*overlap_coefs[i]**2
+	for i in range(gs_morse):
+		for j in range(ex_morse):
+			overlap_function[:,j] = full_function[:,j]*overlap_coefs[i,j]**2
 	print('overlap_func',overlap_function)
 # 	for i in range(num_points):
 # 		sumed_function[i] = sum(overlap_function[i,:])
 	sumed_function = overlap_function.sum(axis=1)
-	return sumed_function
+	return sumed_function #is (4000,41)
 
-print('plot_setup',plot_setup(x_range,alpha_gs,D_gs,alpha_ex,D_ex,mu,n,shift_ex)[500])
+print('plot_setup',plot_setup(x_range,alpha_gs,D_gs,alpha_ex,D_ex,mu,gs_morse,ex_morse,expansion_number,shift_ex).shape)
 
-def absorbance_correction(x_range,alpha_gs,D_gs,alpha_ex,D_ex,mu,n,shift_ex):
-	E_range = energy_distribution(alpha_gs,D_gs,alpha_ex,D_ex,mu,n)[1]
-	summed_function = plot_setup(x_range,alpha_gs,D_gs,alpha_ex,D_ex,mu,n,shift_ex)
+def absorbance_correction(x_range,alpha_gs,D_gs,alpha_ex,D_ex,mu,gs_morse,ex_morse,shift):
+	E_range = energy_distribution(alpha_gs,D_gs,alpha_ex,D_ex,mu,gs_morse,ex_morse)[1]
+	summed_function = plot_setup(x_range,alpha_gs,D_gs,alpha_ex,D_ex,mu,gs_morse,ex_morse,expansion_number,shift)
 	adjusted_plot=np.zeros((summed_function.shape[0],1))
 	for i in range(num_points):
 		adjusted_plot[i]= summed_function[i]*2.7347*E_range[i]*Ha_to_eV#*40.0*math.pi**2.0*fine_struct*E_range[i]/(3.0*math.log(10.0))*2.7347
@@ -279,8 +319,8 @@ def absorbance_correction(x_range,alpha_gs,D_gs,alpha_ex,D_ex,mu,n,shift_ex):
 
 
 
-E_range = energy_distribution(alpha_gs,D_gs,alpha_ex,D_ex,mu,n)[1]
-plot_ready_function =absorbance_correction(x_range,alpha_gs,D_gs,alpha_ex,D_ex,mu,n,shift_ex)
+E_range = energy_distribution(alpha_gs,D_gs,alpha_ex,D_ex,mu,gs_morse,ex_morse)[1]
+plot_ready_function =absorbance_correction(x_range,alpha_gs,D_gs,alpha_ex,D_ex,mu,gs_morse,ex_morse,shift_ex)
 print('plot_ready_func:',plot_ready_function.shape)
 
 def write_output(plot_ready_function,E_range):
@@ -301,34 +341,34 @@ plt.ylabel("Intensity (arb.)")
 plt.show()
 
 
-def compute_mean_sd_skew(spec):
-	# first make sure spectrum has no negative data points:
-	counter=0
-	while counter<spec.shape[0]:
-		if spec[counter,1]<0.0:
-			spec[counter,1]=0.0
-		counter=counter+1
-	step=spec[1,0]-spec[0,0]
+# def compute_mean_sd_skew(spec):
+# 	# first make sure spectrum has no negative data points:
+# 	counter=0
+# 	while counter<spec.shape[0]:
+# 		if spec[counter,1]<0.0:
+# 			spec[counter,1]=0.0
+# 		counter=counter+1
+# 	step=spec[1,0]-spec[0,0]
 
-	# now compute normlization factor
-	norm=0.0
-	for x in spec:
-                norm=norm+x[1]*step
+# 	# now compute normlization factor
+# 	norm=0.0
+# 	for x in spec:
+#                 norm=norm+x[1]*step
 
-	mean=0.0
-	for x in spec:
-		mean=mean+x[0]*x[1]*step
-	mean=mean/norm
+# 	mean=0.0
+# 	for x in spec:
+# 		mean=mean+x[0]*x[1]*step
+# 	mean=mean/norm
 
-	sd=0.0
-	for x in spec:
-		sd=sd+(x[0]-mean)**2.0*x[1]*step
-	sd=math.sqrt(sd)/norm
+# 	sd=0.0
+# 	for x in spec:
+# 		sd=sd+(x[0]-mean)**2.0*x[1]*step
+# 	sd=math.sqrt(sd)/norm
 
-	skew=0.0
-	for x in spec:
-		skew=skew+(x[0]-mean)**3.0*x[1]*step
-	skew=skew/(sd**3.0)
-	skew=skew/norm
+# 	skew=0.0
+# 	for x in spec:
+# 		skew=skew+(x[0]-mean)**3.0*x[1]*step
+# 	skew=skew/(sd**3.0)
+# 	skew=skew/norm
 
-	return mean,sd,skew
+# 	return mean,sd,skew
