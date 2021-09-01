@@ -5,6 +5,8 @@ Created on Mon Jun 28 09:51:57 2021
 
 @author: vinny-holiday
 """
+import os
+import sys
 import matplotlib.pyplot as plt
 import math
 import numpy as np
@@ -13,6 +15,7 @@ import cmath
 from scipy import special
 from scipy import integrate
 from numpy.polynomial.hermite import hermval
+from numba import jit, njit, prange
 
 '''the number of coefficients used is equal to the number of Hermite polynomials used,
 so if you use a single number it will only call H0 the zeroth polynomial'''
@@ -24,13 +27,18 @@ so if you use a single number it will only call H0 the zeroth polynomial'''
 # print('')
 # print('Coeff length:',len(coeff))
 
+
+solvent_cutoff_freq = 0.0001
+solvent_reorg = 0.0015530494095114032
+is_emission = False
+is_solvent = True
+num_morse_oscillators = 1
 max_t = 300
-temp = 100
+temp = 50
 fine_struct=0.0072973525693
 au_to_fs=41
 hbar_in_eVfs=0.6582119514
 ang_to_bohr=1.889725989
-# fs_to_Ha=2.418884326505*10.0**(-2.0)
 Ha_to_eV=27.211396132
 fs_to_Ha=2.418884326505*10.0**(-2.0)
 
@@ -45,16 +53,16 @@ kb_in_Ha=8.6173303*10.0**(-5.0)/Ha_to_eV
 
 kbT=kb_in_Ha*temp
 spectral_window=6
-E_adiabatic = 2
+adiabatic = 2
 
 num_points = 4000
-expansion_number=30 #the number of HO's used for the linear combination method
-n=30 #the number of Morse states to build with HO's
+expansion_number=100 #the number of HO's used for the linear combination method
+# n=30 #the number of Morse states to build with HO's
 gs_morse = 1 #number of gs Morse wavefunctions that will overlap with excited states, should be dependent on boltzmann distribution
-ex_morse = 41
+ex_morse = 20
 
-n_max_gs = 50
-n_max_ex = 50
+n_max_gs = gs_morse
+n_max_ex = ex_morse
 
 'Hartree units (a.u.)' # a.u. = hartree
 D_gs = 0.475217 #2.071824545e-18 J
@@ -75,16 +83,22 @@ shift_ex_angstroms = 0.10659999232835039
 shift_gs = 0.0
 
 'frequency in a.u.'
-omega_gs = 0.01599479871665311 #6.61246943e14 Hz
-omega_ex = 0.01099445915946515
+# omega_gs = 0.01599479871665311 #6.61246943e14 Hz
+# omega_ex = 0.01099445915946515
 # omega_gs = 0.010353662727838314 #4.28020304e14 rad (value when not divided by 2pi)
 
+
 'Hartree units'
-adiabatic =0.0734987 # = 2eV
+E_adiabatic = adiabatic/Ha_to_eV
+E_spectral_window = spectral_window/Ha_to_eV
 # bohr_to_1meter_conversion = 1.8897*10**10
 # Ha1_to_Joul_conversion = 4.3597*10**-18
 # start_point=-0.5702352228173105
 # end_point=0.8892357991145113
+
+
+
+
 
 def spring_const(alpha,D):
 # 	alpha_conv=alpha*(bohr_to_1meter_conversion)
@@ -93,37 +107,51 @@ def spring_const(alpha,D):
 
 print('spring constant:',spring_const(alpha_gs,D_gs))
 
-def mode_freq(alpha_gs,D_gs,alpha_ex,D_ex,mu):
-	omega_gs = np.sqrt(spring_const(alpha_gs,D_gs)/mu)/2*math.pi
-	omega_ex = np.sqrt(spring_const(alpha_ex,D_ex)/mu)/2*math.pi
+# def mode_freq(alpha_gs,D_gs,alpha_ex,D_ex,mu):
+# 	omega_gs = np.sqrt(spring_const(alpha_gs,D_gs)/mu)/2*math.pi
+# 	omega_ex = np.sqrt(spring_const(alpha_ex,D_ex)/mu)/2*math.pi
+# 	return omega_gs,omega_ex
+
+def set_absorption_variables(D_gs,alpha_gs,D_ex,alpha_ex,mu):
+	omega_gs=math.sqrt(2.0*D_gs*alpha_gs**2.0/mu)
+	omega_ex=math.sqrt(2.0*D_ex*alpha_ex**2.0/mu)
 	return omega_gs,omega_ex
 
-print('omega:',mode_freq(alpha_gs,D_gs,alpha_ex,D_ex,mu))
-print('omega:',mode_freq(alpha_gs,D_gs,alpha_ex,D_ex,mu)[0])
 
-def compute_Harm_eval_n(omega,D,n):
-	return omega*(n+0.5)-(omega**2/(4.0*D)*(n+0.5)**2.0)
+# print('omega:',mode_freq(alpha_gs,D_gs,alpha_ex,D_ex,mu))
+# print('omega:',mode_freq(alpha_gs,D_gs,alpha_ex,D_ex,mu)[0])
 
-def find_classical_turning_points_morse(n_max_gs,n_max_ex,alpha_gs,alpha_ex,D_gs,D_ex,shift):
-	freq_gs = mode_freq(alpha_gs,D_gs,alpha_ex,D_ex,mu)[0]
-	freq_ex = mode_freq(alpha_gs,D_gs,alpha_ex,D_ex,mu)[1]
-	E_max_gs=compute_Harm_eval_n(freq_gs,D_gs,n_max_gs) # compute the energies for the highest energy morse 
-	E_max_ex=compute_Harm_eval_n(freq_ex,D_ex,n_max_ex) # state considered
+# def compute_Harm_eval_n(omega,D,n):
+# 	return omega*(n+0.5)-(omega**2/(4.0*D)*(n+0.5)**2.0)
+
+omega_gs,omega_ex = set_absorption_variables(D_gs,alpha_gs,D_ex,alpha_ex,mu)
+
+
+def compute_morse_eval_n(omega,D,n):
+	return omega*(n+0.5)-(omega*(n+0.5))**2.0/(4.0*D)
+
+def find_classical_turning_points_morse(n_max_gs,n_max_ex,freq_gs,freq_ex,alpha_gs,alpha_ex,D_gs,D_ex,shift):
+	E_max_gs=compute_morse_eval_n(freq_gs,D_gs,n_max_gs) # compute the energies for the highest energy morse 
+	E_max_ex=compute_morse_eval_n(freq_ex,D_ex,n_max_ex) # state considered
+
 	# find the two classical turning points for the ground state PES
-	point1_gs = math.sqrt(2*E_max_gs/spring_const(alpha_gs,D_gs))
-	point2_gs = -math.sqrt(2*E_max_gs/spring_const(alpha_gs,D_gs))
-	
-	point1_ex = math.sqrt(2*E_max_ex/spring_const(alpha_ex,D_ex))+shift
-	point2_ex = -math.sqrt(2*E_max_ex/spring_const(alpha_ex,D_ex))+shift
+	point1_gs=math.log(math.sqrt(E_max_gs/D_gs)+1.0)/(-alpha_gs)
+	point2_gs=math.log(-math.sqrt(E_max_gs/D_gs)+1.0)/(-alpha_gs)
+
+	# same for excited state. Include shift vector
+	point1_ex=math.log(math.sqrt(E_max_ex/D_ex)+1.0)/(-alpha_ex)+shift
+	point2_ex=math.log(-math.sqrt(E_max_ex/D_ex)+1.0)/(-alpha_ex)+shift
 
 	# now find the smallest value and the largest value
 	start_point=min(point1_gs,point2_gs)
 	end_point=max(point1_ex,point2_ex)
+
 	return start_point,end_point
 
-print('start & end point:',find_classical_turning_points_morse(n_max_gs,n_max_ex,alpha_gs,alpha_ex,D_gs,D_ex,shift_ex))
-start_point=find_classical_turning_points_morse(n_max_gs,n_max_ex,alpha_gs,alpha_ex,D_gs,D_ex,shift_ex)[0]
-end_point=find_classical_turning_points_morse(n_max_gs,n_max_ex,alpha_gs,alpha_ex,D_gs,D_ex,shift_ex)[1]
+###############################################################################
+
+print('start & end point:',find_classical_turning_points_morse(n_max_gs,n_max_ex,omega_gs,omega_ex,alpha_gs,alpha_ex,D_gs,D_ex,shift_ex))
+start_point,end_point=find_classical_turning_points_morse(n_max_gs,n_max_ex,omega_gs,omega_ex,alpha_gs,alpha_ex,D_gs,D_ex,shift_ex)
 
 ''' below we establish the classical turning points, but Tim increases their sizes by 10% to account for the tunneling that occurs 
 in quantum turning points '''
@@ -132,9 +160,7 @@ end_point= end_point+end_point*0.5
 step_x=(end_point-start_point)/num_points
 x_range = np.arange(start_point,end_point,step_x)
 
-omega_gs = mode_freq(alpha_gs,D_gs,alpha_ex,D_ex,mu)[0]
-omega_ex = mode_freq(alpha_gs,D_gs,alpha_ex,D_ex,mu)[1]
-
+###############################################################################
 
 
 def Morse_wavefunc(num_points,start_point,end_point,D,alpha,mu,n,shift):
@@ -187,11 +213,11 @@ def Harm_wavefunc(x_range,omega,mu,n,shift):
 
 # plt.plot(x_range,psi_func(x_range,alpha_gs,D_gs,alpha_ex,D_ex,mu,4,shift_ex))
 
-print('psi',Harm_wavefunc(x_range,omega_gs,mu,n,0))
-print('psi_shape',Harm_wavefunc(x_range,omega_gs,mu,n,0).shape)
+# print('psi',Harm_wavefunc(x_range,omega_gs,mu,n,0))
+# print('psi_shape',Harm_wavefunc(x_range,omega_gs,mu,n,0).shape)
 
-print('Morse wf',Morse_wavefunc(num_points,start_point,end_point,D_gs,alpha_gs,mu,n,0))
-print('Morse_wf_shape',Morse_wavefunc(num_points,start_point,end_point,D_gs,alpha_gs,mu,n,0).shape)
+# print('Morse wf',Morse_wavefunc(num_points,start_point,end_point,D_gs,alpha_gs,mu,n,0))
+# print('Morse_wf_shape',Morse_wavefunc(num_points,start_point,end_point,D_gs,alpha_gs,mu,n,0).shape)
 
 def LC_coefficients(x_range,omega,num_points,start_point,end_point,D,alpha,mu,n,expansion_number,shift):
     morse = Morse_wavefunc(num_points,start_point,end_point,D,alpha,mu,n,shift)
@@ -200,10 +226,9 @@ def LC_coefficients(x_range,omega,num_points,start_point,end_point,D,alpha,mu,n,
         LC_coeffs[i] = integrate.simps(morse[:,1]*Harm_wavefunc(x_range,omega,mu,i,shift)[:,1],x_range)
     return LC_coeffs
 
-# coefficients = LC_coefficients(x_range,omega_ex,num_points,start_point,end_point,D_ex,alpha_ex,mu,n,expansion_number,shift_ex)
-# plt.plot(coefficients)
-print('coefficients:',LC_coefficients(x_range,omega_ex,num_points,start_point,end_point,D_ex,alpha_ex,mu,n,expansion_number,shift_ex))
-print('coefficients sum SQ:',sum(LC_coefficients(x_range,omega_ex,num_points,start_point,end_point,D_ex,alpha_ex,mu,n,expansion_number,shift_ex)**2))
+Coefficients = LC_coefficients(x_range,omega_ex,num_points,start_point,end_point,D_ex,alpha_ex,mu,30,expansion_number,shift_ex)
+print('coefficients:',Coefficients)
+print('coefficients sum SQ:',sum(Coefficients**2))
 print('')
 
 def Linear_combo_wfs(x_range,omega,D,alpha,mu,n,expansion_number,shift):
@@ -251,93 +276,6 @@ def LC_func_overlaps(x_range,omega_gs,omega_ex,D_ex,alpha_ex,D_gs,alpha_gs,mu,gs
 	return gs_ex_Mat
 
 
-def compute_morse_eval_n(omega,D,n):
-        return omega*(n+0.5)-(omega*(n+0.5))**2.0/(4.0*D)
-
-factors =  LC_func_overlaps(x_range,omega_gs,omega_ex,D_ex,alpha_ex,D_gs,alpha_gs,mu,gs_morse,ex_morse,expansion_number,shift_ex)
-
-def compute_morse_chi_func_t(omega_gs,D_gs,kbT,factors,energies,t):
-        chi=0.0+0.0j
-        Z=0.0 # partition function
-        for n_gs in range(factors.shape[0]):
-                Egs=compute_morse_eval_n(omega_gs,D_gs,n_gs)
-                boltzmann=math.exp(-Egs/kbT)
-                Z=Z+boltzmann
-                for n_ex in range(factors.shape[1]):
-                        chi=chi+boltzmann*factors[n_gs,n_ex]*cmath.exp(-1j*energies[n_gs,n_ex]*t)
-	
-        chi=chi/Z	
-
-        return cmath.polar(chi)
-
-
-def compute_exact_response_func(factors,energies,freq_gs,D_gs,kbT,max_t,num_steps):
-        step_length=max_t/num_steps
-        # end fc integral definition
-        chi_full=np.zeros((num_steps,3))
-        response_func = np.zeros((num_steps, 2), dtype=np.complex_)
-        current_t=0.0
-        for counter in range(num_steps):
-                chi_t=compute_morse_chi_func_t(freq_gs,D_gs,kbT,factors,energies,current_t)
-                chi_full[counter,0]=current_t
-                chi_full[counter,1]=chi_t[0]
-                chi_full[counter,2]=chi_t[1]
-                current_t=current_t+step_length
-
-        # now make sure that phase is a continuous function:
-        phase_fac=0.0
-        for counter in range(num_steps-1):
-                chi_full[counter,2]=chi_full[counter,2]+phase_fac
-                if abs(chi_full[counter,2]-phase_fac-chi_full[counter+1,2])>0.7*math.pi: #check for discontinuous jump.
-                        diff=chi_full[counter+1,2]-(chi_full[counter,2]-phase_fac)
-                        frac=diff/math.pi
-                        n=int(round(frac))
-                        phase_fac=phase_fac-math.pi*n
-                chi_full[num_steps-1,2]=chi_full[num_steps-1,2]+phase_fac
-
-	# now construct response function
-        for counter in range(num_steps):
-                response_func[counter,0]=chi_full[counter,0]
-                response_func[counter,1]=chi_full[counter,1]*cmath.exp(1j*chi_full[counter,2])
-
-        return response_func
-
-
-
-def full_spectrum(response_func,solvent_response_func,steps_spectrum,start_val,end_val,is_solvent,is_emission,stdout):
-	spectrum=np.zeros((steps_spectrum,2))
-	counter=0
-	# print total response function
-	stdout.write('\n'+'Total Chromophore linear response function of the system:'+'\n')
-	stdout.write('\n'+'  Step       Time (fs)          Re[Chi]         Im[Chi]'+'\n')
-	for i in range(response_func.shape[0]):
-		stdout.write("%5d      %10.4f          %10.4e       %10.4e" % (i+1,np.real(response_func[i,0])*fs_to_Ha, np.real(response_func[i,1]), np.imag(response_func[i,1]))+'\n')
-
-	stdout.write('\n'+'Computing linear spectrum of the system between '+str(start_val*Ha_to_eV)+' and '+str(end_val*Ha_to_eV)+' eV.')
-	stdout.write('\n'+'Total linear spectrum of the system:'+'\n')
-	stdout.write('Energy (Ha)         Absorbance (Ha)'+'\n')	
-	step_length=((end_val-start_val)/steps_spectrum)
-	while counter<spectrum.shape[0]:
-		E_val=start_val+counter*step_length
-		prefac=spectrum_prefactor(E_val,is_emission)
-		integrant=full_spectrum_integrant(response_func,solvent_response_func,E_val,is_solvent)
-		spectrum[counter,0]=E_val
-		spectrum[counter,1]=prefac*(integrate.simps(integrant,dx=response_func[1,0].real-response_func[0,0].real))
-		stdout.write("%2.5f          %10.4e" % (spectrum[counter,0], spectrum[counter,1])+'\n') 
-		counter=counter+1
-
-	# Dont do it
-	# compute mean, skew and SD of spectrum
-#	temp_spec=spectrum
-#	print(spectrum)
-#	mean,sd,skew=compute_mean_sd_skew(temp_spec)
-#	print('Spectrum positive?')
-#	stdout.write('\n'+'Mean of spectrum: '+str(mean)+' Ha, SD: '+str(sd)+' Ha, Skew: '+str(skew)+'\n')
-#	print(spectrum)
-#	# unit conversion: Print X-Axis in eV
-	spectrum[:,0]=spectrum[:,0]*Ha_to_eV	
-
-	return spectrum
 
 
 def spectrum_prefactor(Eval,is_emission):
@@ -356,7 +294,6 @@ def spectrum_prefactor(Eval,is_emission):
 
 	return prefac
 
-
 def full_spectrum_integrant(response_func,solvent_response_func,E_val,is_solvent):
 	integrant=np.zeros(response_func.shape[0])
 	counter=0
@@ -365,224 +302,227 @@ def full_spectrum_integrant(response_func,solvent_response_func,E_val,is_solvent
 			integrant[counter]=(response_func[counter,1]*solvent_response_func[counter,1]*cmath.exp(1j*response_func[counter,0]*E_val)).real
 		else:
 			integrant[counter]=(response_func[counter,1]*cmath.exp(1j*response_func[counter,0]*E_val)).real
-			counter=counter+1
+		counter=counter+1
 	return integrant
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-##################################3
-###################################
-###################################
-
-def LC_func_overlaps(x_range,omega_gs,omega_ex,D_ex,alpha_ex,D_gs,alpha_gs,mu,gs_morse,ex_morse,expansion_number,shift):
-	gs_LC_morse=np.zeros((num_points,gs_morse))
-	ex_LC_morse=np.zeros((num_points,ex_morse))
-	gs_ex_Mat=np.zeros((gs_morse,ex_morse))
+def full_spectrum(response_func,solvent_response_func,steps_spectrum,start_val,end_val,is_solvent,is_emission):
+	spectrum=np.zeros((steps_spectrum,2))
 	counter=0
-	step0=start_point
-	step1=start_point+step_x
-	for i in range(gs_morse):
-		gs_LC_morse[:,i]=Linear_combo_wfs(x_range,omega_gs,D_gs,alpha_gs,mu,i,expansion_number,0.0)[:,1] #start_point+counter*step_x
-	print('gs_LC_Morse',gs_LC_morse)
-	
-	for j in range(ex_morse):
-		ex_LC_morse[:,j] = Linear_combo_wfs(x_range,omega_ex,D_ex,alpha_ex,mu,j,expansion_number,shift)[:,1]
-	print('ex_LC_Morse',ex_LC_morse)
-	
-	for k in range(gs_morse):
-		for l in range(ex_morse):
-			overlap=gs_LC_morse[:,k]*ex_LC_morse[:,l]
-			gs_ex_Mat[k,l]=integrate.simps(gs_LC_morse[:,k]*ex_LC_morse[:,l],dx=step1-step0)
-	return gs_ex_Mat
+	spectrum_file = open('./Linear_combo_Full_Spec_vince.out', 'w')
+	# print total response function
+	spectrum_file.write('\n'+'Total Chromophore linear response function of the system:'+'\n')
+	spectrum_file.write('\n'+'  Step       Time (fs)          Re[Chi]         Im[Chi]'+'\n')
+	for i in range(response_func.shape[0]):
+		spectrum_file.write("%5d      %10.4f          %10.4e       %10.4e" % (i+1,np.real(response_func[i,0])*fs_to_Ha, np.real(response_func[i,1]), np.imag(response_func[i,1]))+'\n')
 
+	spectrum_file.write('\n'+'Computing linear spectrum of the system between '+str(start_val*Ha_to_eV)+' and '+str(end_val*Ha_to_eV)+' eV.')
+	spectrum_file.write('\n'+'Total linear spectrum of the system:'+'\n')
+	spectrum_file.write('Energy (Ha)         Absorbance (Ha)'+'\n')	
+	step_length=((end_val-start_val)/steps_spectrum)
+	while counter<spectrum.shape[0]:
+		E_val=start_val+counter*step_length
+		prefac=spectrum_prefactor(E_val,is_emission)
+		integrant=full_spectrum_integrant(response_func,solvent_response_func,E_val,is_solvent)
+		spectrum[counter,0]=E_val
+		spectrum[counter,1]=prefac*(integrate.simps(integrant,dx=response_func[1,0].real-response_func[0,0].real))
+		spectrum_file.write("%2.5f          %10.4e" % (spectrum[counter,0], spectrum[counter,1])+'\n') 
+		counter=counter+1
 
-print('MORSE LC OVERLAP MAT:', LC_func_overlaps(x_range,omega_gs,omega_ex,D_ex,alpha_ex,D_gs,alpha_gs,mu,gs_morse,ex_morse,expansion_number,shift_ex)**2)
-plt.plot(LC_func_overlaps(x_range,omega_gs,omega_ex,D_ex,alpha_ex,D_gs,alpha_gs,mu,gs_morse,ex_morse,expansion_number,shift_ex)[0,:]**2)
-
-def transition_energy(omega_ex,D_ex,omega_gs,D_gs,n):
-	E_gs=compute_Harm_eval_n(omega_gs,D_gs,n)
-	E_ex=compute_Harm_eval_n(omega_ex,D_ex,n)
-	return (E_ex-E_gs)+adiabatic
-
-# print ('transition energy:',transition_energy(omega_ex,D_ex,omega_gs,D_gs,0))
-# print('')
-
-
-def energy_distribution(alpha_gs,D_gs,alpha_ex,D_ex,mu,gs_morse,ex_morse):
-	max_abs = D_ex+transition_energy(omega_ex,D_ex,omega_gs,D_gs,0)+0.09#+transition_energy(omega_ex,D_ex,omega_gs,D_gs,0)#(D_ex+adiabatic)*Ha_to_eV-compute_Harm_eval_n(omega_gs,D_gs,0)*au_to_fs*hbar_in_eVfs#largest possible excitation energy
-# 	freq_ex = mode_freq(alpha_gs,D_gs,alpha_ex,D_ex,mu)[1]
-	min_abs = transition_energy(omega_ex,D_ex,omega_gs,D_gs,0)#0-0 transition # compute the energies for the highest energy morse 
-# 	max_abs = compute_Harm_eval_n(freq_ex,D_ex,n_max_ex)+transition_energy(omega_ex,D_ex,omega_gs,D_gs,0)# state considered
-# 	vib_ex1 = compute_Harm_eval_n(omega_ex,D_ex,1)#+adiabatic*Ha_to_eV
-# 	vib_ex0 = compute_Harm_eval_n(omega_ex,D_ex,0)
-	'''doesnt take in to account the decrease in vibrational eigenvalue energy difference as state increases definitely a source of error 
-	can we add a decay rate???'''
-	E_vib=np.zeros(gs_morse*ex_morse)
-	for i in range(gs_morse*ex_morse):
-		E_vib[i]= compute_Harm_eval_n(omega_ex,D_ex,i)-compute_Harm_eval_n(omega_ex,D_ex,0) #energy difference between two vibrational harmonic eigenstates
-	
-	E_trans = np.zeros(gs_morse*ex_morse)
-	E_range= np.zeros(num_points)
-	E_stepx = (max_abs-min_abs)/num_points
-
-	
-	#populate E_trans with vibronic transition energies
-	for i in range(gs_morse*ex_morse):
-		if i == 0:
-			E_trans[i]=min_abs #the zero position 
-		else:
-			E_trans[i]=min_abs + E_vib[i]
-	
-	#'populate E_range with energy grid over which to plot spectrum  (in eV)'
-	for i in range(num_points):
-		E_range[i] = (min_abs-(min_abs*.2))+i*E_stepx #subtracted 20% from min_abs to capture full peak width (min_abs-(min_abs*0.1))
-		
-	return E_trans,E_range
-
-print('EIGENVALUE:',compute_Harm_eval_n(omega_ex,D_ex,40))
-
-#excited states
-#eigenvalues
-#EIGENVALUE_40: 0.19841586671955957
-#EIGENVALUE_28: 0.19265707369937785
-#EIGENVALUE_27: 0.1901613724845435
-#EIGENVALUE_25: 0.18423959999495831
-
-# E_range = energy_distribution(alpha_gs,D_gs,alpha_ex,D_ex,mu,gs_morse,ex_morse)[1]
-# print ('E_range',energy_distribution(alpha_gs,D_gs,alpha_ex,D_ex,mu,gs_morse,ex_morse)[1])
-# print('E_trans',energy_distribution(alpha_gs,D_gs,alpha_ex,D_ex,mu,gs_morse,ex_morse)[0])
-# print ('space here')
-# print ('')
-
-def gaussian_setup(alpha_gs,D_gs,alpha_ex,D_ex,mu,gs_morse,ex_morse):
-	E_range = energy_distribution(alpha_gs,D_gs,alpha_ex,D_ex,mu,gs_morse,ex_morse)[1]
-	E_trans = energy_distribution(alpha_gs,D_gs,alpha_ex,D_ex,mu,gs_morse,ex_morse)[0]
-	s = 0.001 #arbitrary gaussian SD, causes linewidth to change
-	full_function = np.zeros((num_points,gs_morse*ex_morse))
-	for i in range(gs_morse*ex_morse):
-		for k in range(num_points):
-			full_function[k,i]=np.exp(-(E_range[k]-E_trans[i])**2/(2*s**2))
-
-	return full_function
-
-# print('full_function:',gaussian_setup(alpha_gs,D_gs,alpha_ex,D_ex,mu,gs_morse,ex_morse))
-# plt.plot(x_range,gaussian_setup(alpha_gs,D_gs,alpha_ex,D_ex,mu,gs_morse,ex_morse)[:,40])
-
-def plot_setup(x_range,alpha_gs,D_gs,alpha_ex,D_ex,mu,gs_morse,ex_morse,expansion_number,shift):
-	full_function = gaussian_setup(alpha_gs,D_gs,alpha_ex,D_ex,mu,gs_morse,ex_morse)
-	overlap_coefs = LC_func_overlaps(x_range,omega_gs,omega_ex,D_ex,alpha_ex,D_gs,alpha_gs,mu,gs_morse,ex_morse,expansion_number,shift)
-	overlap_function=np.zeros((num_points,gs_morse*ex_morse))
-	sumed_function = np.zeros((num_points,1))
-	for i in range(gs_morse):
-		for j in range(ex_morse):
-			overlap_function[:,j] = full_function[:,j]*overlap_coefs[i,j]**2
-	print('overlap_func',overlap_function)
-# 	for i in range(num_points):
-# 		sumed_function[i] = sum(overlap_function[i,:])
-	sumed_function = overlap_function.sum(axis=1)
-	return sumed_function #is (4000,41)
-
-# print('plot_setup',plot_setup(x_range,alpha_gs,D_gs,alpha_ex,D_ex,mu,gs_morse,ex_morse,expansion_number,shift_ex).shape)
-
-def absorbance_correction(x_range,alpha_gs,D_gs,alpha_ex,D_ex,mu,gs_morse,ex_morse,shift):
-	E_range = energy_distribution(alpha_gs,D_gs,alpha_ex,D_ex,mu,gs_morse,ex_morse)[1]
-	summed_function = plot_setup(x_range,alpha_gs,D_gs,alpha_ex,D_ex,mu,gs_morse,ex_morse,expansion_number,shift)
-	adjusted_plot=np.zeros((summed_function.shape[0],1))
-	for i in range(num_points):
-		adjusted_plot[i]= summed_function[i]*2.7347*E_range[i]*Ha_to_eV#*40.0*math.pi**2.0*fine_struct*E_range[i]/(3.0*math.log(10.0))*2.7347
-	return adjusted_plot
-
-
-
-E_range = energy_distribution(alpha_gs,D_gs,alpha_ex,D_ex,mu,gs_morse,ex_morse)[1]
-plot_ready_function =absorbance_correction(x_range,alpha_gs,D_gs,alpha_ex,D_ex,mu,gs_morse,ex_morse,shift_ex)
-print('plot_ready_func:',plot_ready_function.shape)
-
-def write_output(plot_ready_function,E_range):
-	spectrum_file = open('./Linear_combo.out', 'w')
-	xarray = np.array(E_range*Ha_to_eV)
-	yarray = np.array(plot_ready_function)
-	data = np.column_stack([xarray,yarray])
-	np.savetxt(spectrum_file,data,fmt=['%10.10f','%10.10f'])
+	spectrum[:,0]=spectrum[:,0]*Ha_to_eV	
 	spectrum_file.close()
-	return spectrum_file
-
-my_file = write_output(plot_ready_function,E_range)
+	return spectrum
 
 
-plt.plot(E_range*Ha_to_eV,plot_ready_function)
-plt.xlabel("Energy (eV)")
-plt.ylabel("Intensity (arb.)")
-plt.show()
+
+@jit(fastmath=True)
+def integrant_2nd_order_cumulant_lineshape(spectral_dens,t_val,kbT):
+	integrant=np.zeros((spectral_dens.shape[0],spectral_dens.shape[1]),dtype=np.complex_)
+	for counter in range(spectral_dens.shape[0]):
+		omega=spectral_dens[counter,0]
+		integrant[counter,0]=omega
+		if counter==0:
+			integrant[counter,1]=0.0
+		else:
+			integrant[counter,1]=1.0/math.pi*spectral_dens[counter,1]/(omega**2.0)*(2.0*cmath.cosh(omega/(2.0*kbT))/cmath.sinh(omega/(2.0*kbT))*(math.sin(omega*t_val/2.0))**2.0+1j*(math.sin(omega*t_val)-omega*t_val))
+
+	return integrant
+
+# define the maximum number of t points this should be calculated for and the maximum number of steps
+def compute_2nd_order_cumulant_from_spectral_dens(spectral_dens,kbT,max_t,steps):
+    outfile = open('2nd_ord_cum_from_spec_den.dat','w')
+    q_func=np.zeros((steps,2),dtype=complex)
+    outfile.write('\n'+"Computing second order cumulant lineshape function."+'\n')
+    outfile.write('\n'+'  Step       Time (fs)          Re[g_2]         Im[g_2]'+'\n')
+    step_length=max_t/steps
+    step_length_omega=spectral_dens[1,0]-spectral_dens[0,0]
+    counter=0
+    while counter<steps:
+        t_current=counter*step_length
+        q_func[counter,0]=t_current
+        integrant=integrant_2nd_order_cumulant_lineshape(spectral_dens,t_current,kbT)
+        q_func[counter,1]=integrate.simps(integrant[:,1],dx=(integrant[1,0]-integrant[0,0]))   #  give x and y axis
+        outfile.write("%5d      %10.4f          %10.4e           %10.4e" % (counter,t_current*fs_to_Ha, np.real(q_func[counter,1]), np.imag(q_func[counter,1]))+'\n')
+        counter=counter+1
+    outfile.close()
+    return q_func
 
 
-# def compute_mean_sd_skew(spec):
-# 	# first make sure spectrum has no negative data points:
-# 	counter=0
-# 	while counter<spec.shape[0]:
-# 		if spec[counter,1]<0.0:
-# 			spec[counter,1]=0.0
-# 		counter=counter+1
-# 	step=spec[1,0]-spec[0,0]
+def solvent_spectral_dens(omega_cut,reorg,max_omega,num_steps):
+	spectral_dens=np.zeros((num_steps,2))
+	step_length=max_omega/num_steps
+	counter=0
+	omega=0.0
+	while counter<num_steps:
+		spectral_dens[counter,0]=omega
+		# this definition of the spectral density guarantees that integrating the spectral dens yields the 
+		# reorganization energy. We thus have a physical motivation for the chosen parameters
+		spectral_dens[counter,1]=2.0*reorg*omega/((1.0+(omega/omega_cut)**2.0)*omega_cut)
+		omega=omega+step_length
+		counter=counter+1
+	return spectral_dens
 
-# 	# now compute normlization factor
-# 	norm=0.0
-# 	for x in spec:
-#                 norm=norm+x[1]*step
 
-# 	mean=0.0
-# 	for x in spec:
-# 		mean=mean+x[0]*x[1]*step
-# 	mean=mean/norm
+spectral_dens=np.zeros((1,1))
+g2_solvent=np.zeros((1,1))
+solvent_response=np.zeros((1,1))
 
-# 	sd=0.0
-# 	for x in spec:
-# 		sd=sd+(x[0]-mean)**2.0*x[1]*step
-# 	sd=math.sqrt(sd)/norm
+def calc_spectral_dens(num_points):
+    spectral_dens=solvent_spectral_dens(solvent_cutoff_freq,solvent_reorg,solvent_cutoff_freq*20.0,num_points)
+    return spectral_dens
 
-# 	skew=0.0
-# 	for x in spec:
-# 		skew=skew+(x[0]-mean)**3.0*x[1]*step
-# 	skew=skew/(sd**3.0)
-# 	skew=skew/norm
 
-# 	return mean,sd,skew
+def calc_g2_solvent(temp,num_points,max_t):
+    spectral_dens = calc_spectral_dens(num_points)
+    print('computing solvent lineshape function')
+    kbT=kb_in_Ha*temp
+    g2_solvent=compute_2nd_order_cumulant_from_spectral_dens(spectral_dens,kbT,max_t,num_points)
+    return g2_solvent
+    
+def calc_solvent_response(is_emission):
+    g2_solvent = calc_g2_solvent(temp,num_points,max_t)
+    counter=0
+    response_func=np.zeros((g2_solvent.shape[0],2),dtype=complex)
+    while counter<g2_solvent.shape[0]:
+        response_func[counter,0]=g2_solvent[counter,0].real
+        if is_emission:
+            response_func[counter,1]=cmath.exp(-np.conj(g2_solvent[counter,1]))
+        else:
+            response_func[counter,1]=cmath.exp(-g2_solvent[counter,1])
+        counter=counter+1
+    solvent_response=response_func
+    print('SOLVENT RESPONSE VA', solvent_response)
+    return solvent_response
+
+# this function brings together the response function in its most recognizable form
+# in terms of theoretical representations, returns resp func in polar coordinates
+@jit(fastmath=True)
+def compute_morse_chi_func_t(omega_gs,D_gs,kbT,factors,energies,t):
+        chi=0.0+0.0j
+        Z=0.0 # partition function
+        for n_gs in range(factors.shape[0]):
+                Egs=compute_morse_eval_n(omega_gs,D_gs,n_gs)
+                boltzmann=math.exp(-Egs/kbT)
+                Z=Z+boltzmann
+                for n_ex in range(factors.shape[1]):
+                        chi=chi+boltzmann*factors[n_gs,n_ex]*cmath.exp(-1j*energies[n_gs,n_ex]*t)
+
+        chi=chi/Z	
+
+        return cmath.polar(chi)
+
+
+def compute_exact_response_func(factors,energies,omega_gs,D_gs,kbT,max_t,num_points):
+        step_length=max_t/num_points
+        # end fc integral definition
+        chi_full=np.zeros((num_points,3))
+        response_func = np.zeros((num_points, 2), dtype=np.complex_)
+        current_t=0.0
+        for counter in range(num_points):
+                chi_t=compute_morse_chi_func_t(omega_gs,D_gs,kbT,factors,energies,current_t)
+                chi_full[counter,0]=current_t
+                chi_full[counter,1]=chi_t[0]
+                chi_full[counter,2]=chi_t[1]
+                current_t=current_t+step_length
+
+        # now make sure that phase is a continuous function:
+        phase_fac=0.0
+        for counter in range(num_points-1):
+                chi_full[counter,2]=chi_full[counter,2]+phase_fac
+                if abs(chi_full[counter,2]-phase_fac-chi_full[counter+1,2])>0.7*math.pi: #check for discontinuous jump.
+                        diff=chi_full[counter+1,2]-(chi_full[counter,2]-phase_fac)
+                        frac=diff/math.pi
+                        n=int(round(frac))
+                        phase_fac=phase_fac-math.pi*n
+                chi_full[num_points-1,2]=chi_full[num_points-1,2]+phase_fac
+
+	# now construct response function
+        for counter in range(num_points):
+                response_func[counter,0]=chi_full[counter,0]
+                response_func[counter,1]=chi_full[counter,1]*cmath.exp(1j*chi_full[counter,2])
+
+        return response_func
+
+
+# calculate transition energy between two specific morse oscillators.
+def transition_energy(n_gs,n_ex):
+	E_gs=compute_morse_eval_n(omega_gs,D_gs,n_gs)
+	E_ex=compute_morse_eval_n(omega_ex,D_ex,n_ex)
+	return E_ex-E_gs
+
+
+wf_overlaps=np.zeros((gs_morse,ex_morse))
+wf_overlaps_sq=np.zeros((gs_morse,ex_morse))
+boltzmann_fac=np.zeros((gs_morse))
+transition_energies=np.zeros((gs_morse,ex_morse))
+gs_energies=np.zeros(int(gs_morse))
+ex_energies=np.zeros(int(ex_morse))
+
+exact_response_func=np.zeros((1,1),dtype=np.complex_)
+total_exact_response_func=np.zeros((1,1),dtype=np.complex_)
+
+def compute_exact_response(temp,omega_gs,omega_ex,max_t,num_steps):
+	kbT=kb_in_Ha*temp
+	for i in range(gs_morse):
+		gs_energies[i]=compute_morse_eval_n(omega_gs,D_gs,i)
+		for j in range(ex_morse):
+			ex_energies[j]=compute_morse_eval_n(omega_ex,D_ex,j)+E_adiabatic
+			transition_energies[i,j]=transition_energy(i,j)
+	wf_overlaps=LC_func_overlaps(x_range,omega_gs,omega_ex,D_ex,alpha_ex,D_gs,alpha_gs,mu,gs_morse,ex_morse,expansion_number,shift_ex)
+	wf_overlaps_sq=wf_overlaps**2.0
+	exact_response_func=compute_exact_response_func(wf_overlaps_sq,transition_energies,omega_gs,D_gs,kbT,max_t,num_steps)
+	print('lC MORSE OVERLAPS',wf_overlaps_sq)
+	return exact_response_func
+
+
+def compute_total_exact_response(temp,max_t,num_points):
+	total_exact_response_func = compute_exact_response(temp,omega_gs,omega_ex,max_t,num_points)
+	print('Computed response func!')
+	print(total_exact_response_func)
+	for j in range(total_exact_response_func.shape[0]):
+		total_exact_response_func[j,1]=total_exact_response_func[j,1]*cmath.exp(-1j*E_adiabatic*total_exact_response_func[j,0])
+	
+	return total_exact_response_func
+
+
+
+def compute_morse_absorption(is_emission,temp,num_points,max_t):
+	# first compute solvent response. This is NOT optional for the Morse oscillator, same
+	solvent_response = calc_solvent_response(is_emission)
+	# figure out start and end values over which we compute the spectrum
+	# at the moment this is a Hack because we have no expression to analytically 
+	# evaluate the average energy gap of the Morse oscillator. 
+	E_start=E_adiabatic-E_spectral_window/2.0
+	E_end=E_adiabatic+E_spectral_window/2.0
+
+	# exact solution to the morse oscillator
+	total_exact_response_func = compute_total_exact_response(temp,max_t,num_points)
+	print('total exact response func')
+	print(total_exact_response_func.shape)
+	print(total_exact_response_func)
+	spectrum=full_spectrum(total_exact_response_func,solvent_response,num_points,E_start,E_end,True,False)
+	np.savetxt('Morse_exact_spectrum.dat', spectrum, header='Energy (eV)      Intensity (arb. units)')
+
+
+linear_absorption = compute_morse_absorption(is_emission,temp,num_points,max_t)
+
+
