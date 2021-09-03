@@ -29,7 +29,7 @@ so if you use a single number it will only call H0 the zeroth polynomial'''
 
 
 solvent_cutoff_freq = 0.0001
-solvent_reorg = 0.0015530494095114032
+solvent_reorg = 0.00015530494095114032
 is_emission = False
 is_solvent = True
 num_morse_oscillators = 1
@@ -56,7 +56,7 @@ spectral_window=6
 adiabatic = 2
 
 num_points = 4000
-expansion_number=100 #the number of HO's used for the linear combination method
+expansion_number=125 #the number of HO's used for the linear combination method
 # n=30 #the number of Morse states to build with HO's
 gs_morse = 1 #number of gs Morse wavefunctions that will overlap with excited states, should be dependent on boltzmann distribution
 ex_morse = 20
@@ -105,7 +105,7 @@ def spring_const(alpha,D):
 # 	D_conv = D*(Ha1_to_Joul_conversion)
 	return (alpha**2)*2*D
 
-print('spring constant:',spring_const(alpha_gs,D_gs))
+# print('spring constant:',spring_const(alpha_gs,D_gs))
 
 # def mode_freq(alpha_gs,D_gs,alpha_ex,D_ex,mu):
 # 	omega_gs = np.sqrt(spring_const(alpha_gs,D_gs)/mu)/2*math.pi
@@ -150,7 +150,7 @@ def find_classical_turning_points_morse(n_max_gs,n_max_ex,freq_gs,freq_ex,alpha_
 
 ###############################################################################
 
-print('start & end point:',find_classical_turning_points_morse(n_max_gs,n_max_ex,omega_gs,omega_ex,alpha_gs,alpha_ex,D_gs,D_ex,shift_ex))
+# print('start & end point:',find_classical_turning_points_morse(n_max_gs,n_max_ex,omega_gs,omega_ex,alpha_gs,alpha_ex,D_gs,D_ex,shift_ex))
 start_point,end_point=find_classical_turning_points_morse(n_max_gs,n_max_ex,omega_gs,omega_ex,alpha_gs,alpha_ex,D_gs,D_ex,shift_ex)
 
 ''' below we establish the classical turning points, but Tim increases their sizes by 10% to account for the tunneling that occurs 
@@ -227,9 +227,9 @@ def LC_coefficients(x_range,omega,num_points,start_point,end_point,D,alpha,mu,n,
     return LC_coeffs
 
 Coefficients = LC_coefficients(x_range,omega_ex,num_points,start_point,end_point,D_ex,alpha_ex,mu,30,expansion_number,shift_ex)
-print('coefficients:',Coefficients)
-print('coefficients sum SQ:',sum(Coefficients**2))
-print('')
+# print('coefficients:',Coefficients)
+# print('coefficients sum SQ:',sum(Coefficients**2))
+# print('')
 
 def Linear_combo_wfs(x_range,omega,D,alpha,mu,n,expansion_number,shift):
 	coefficients=LC_coefficients(x_range,omega,num_points,start_point,end_point,D,alpha,mu,n,expansion_number,shift)
@@ -245,7 +245,7 @@ def Linear_combo_wfs(x_range,omega,D,alpha,mu,n,expansion_number,shift):
 	LC_func_final[:,1]= LC_func.sum(axis=1)
 	return LC_func_final
 
-print('LC_func_total:',Linear_combo_wfs(x_range,omega_gs,D_gs,alpha_gs,mu,0,expansion_number,0.0))
+# print('LC_func_total:',Linear_combo_wfs(x_range,omega_gs,D_gs,alpha_gs,mu,0,expansion_number,0.0))
 # print('')
 # Morse_LC_wf_gs = Linear_combo_wfs(x_range,omega_gs,D_gs,alpha_gs,mu,0,expansion_number,0.0)
 # Morse_LC_wf_ex = Linear_combo_wfs(x_range,omega_ex,D_ex,alpha_ex,mu,2,expansion_number,shift_ex)
@@ -305,16 +305,25 @@ def full_spectrum_integrant(response_func,solvent_response_func,E_val,is_solvent
 		counter=counter+1
 	return integrant
 
+
+
 def full_spectrum(response_func,solvent_response_func,steps_spectrum,start_val,end_val,is_solvent,is_emission):
+	c1 = np.zeros((steps_spectrum,4))
 	spectrum=np.zeros((steps_spectrum,2))
 	counter=0
-	spectrum_file = open('./Linear_combo_Full_Spec_vince.out', 'w')
-	# print total response function
-	spectrum_file.write('\n'+'Total Chromophore linear response function of the system:'+'\n')
-	spectrum_file.write('\n'+'  Step       Time (fs)          Re[Chi]         Im[Chi]'+'\n')
+	spectrum_file = open('./Linear_Spectrum_in_Ha.out', 'w')
+	Response_func_file = open('./Response_func_and_Spectrum_vince.out', 'w')
+	Response_func_file.write('\n'+'Total Chromophore linear response function of the system:'+'\n')
+	Response_func_file.write('\n'+'  Step       Time (fs)          Re[Chi]         Im[Chi]'+'\n')
 	for i in range(response_func.shape[0]):
-		spectrum_file.write("%5d      %10.4f          %10.4e       %10.4e" % (i+1,np.real(response_func[i,0])*fs_to_Ha, np.real(response_func[i,1]), np.imag(response_func[i,1]))+'\n')
-
+		c1[i,0] = i+1
+		c1[i,1] = np.real(response_func[i,0])*fs_to_Ha
+		c1[i,2] = np.real(response_func[i,1])
+		c1[i,3] = np.imag(response_func[i,1])
+	np.savetxt(Response_func_file,c1,fmt=['%10.10f','%10.10f','%10.10f','%10.10f'])
+	Response_func_file.close()
+		#spectrum_file.write("%5d      %10.4f          %10.4e       %10.4e" % (i+1,np.real(response_func[i,0])*fs_to_Ha, np.real(response_func[i,1]), np.imag(response_func[i,1]))+'\n')
+		#spectrum_file.write(i+1 np.real(response_func[i,0])*fs_to_Ha np.real(response_func[i,1]) np.imag(response_func[i,1]))
 	spectrum_file.write('\n'+'Computing linear spectrum of the system between '+str(start_val*Ha_to_eV)+' and '+str(end_val*Ha_to_eV)+' eV.')
 	spectrum_file.write('\n'+'Total linear spectrum of the system:'+'\n')
 	spectrum_file.write('Energy (Ha)         Absorbance (Ha)'+'\n')	
@@ -388,14 +397,15 @@ solvent_response=np.zeros((1,1))
 
 def calc_spectral_dens(num_points):
     spectral_dens=solvent_spectral_dens(solvent_cutoff_freq,solvent_reorg,solvent_cutoff_freq*20.0,num_points)
+    print('Solvent Spectral Density',spectral_dens)
     return spectral_dens
 
 
 def calc_g2_solvent(temp,num_points,max_t):
     spectral_dens = calc_spectral_dens(num_points)
-    print('computing solvent lineshape function')
     kbT=kb_in_Ha*temp
     g2_solvent=compute_2nd_order_cumulant_from_spectral_dens(spectral_dens,kbT,max_t,num_points)
+    print('solvent g2 cumulant', g2_solvent)
     return g2_solvent
     
 def calc_solvent_response(is_emission):
@@ -410,7 +420,7 @@ def calc_solvent_response(is_emission):
             response_func[counter,1]=cmath.exp(-g2_solvent[counter,1])
         counter=counter+1
     solvent_response=response_func
-    print('SOLVENT RESPONSE VA', solvent_response)
+    print('SOLVENT RESPONSE', solvent_response)
     return solvent_response
 
 # this function brings together the response function in its most recognizable form
@@ -427,7 +437,7 @@ def compute_morse_chi_func_t(omega_gs,D_gs,kbT,factors,energies,t):
                         chi=chi+boltzmann*factors[n_gs,n_ex]*cmath.exp(-1j*energies[n_gs,n_ex]*t)
 
         chi=chi/Z	
-
+        print('compute_morse_chi_func_t',cmath.polar(chi))
         return cmath.polar(chi)
 
 
@@ -443,7 +453,7 @@ def compute_exact_response_func(factors,energies,omega_gs,D_gs,kbT,max_t,num_poi
                 chi_full[counter,1]=chi_t[0]
                 chi_full[counter,2]=chi_t[1]
                 current_t=current_t+step_length
-
+        #print('compute_morse_chi_func_t',chi_full)
         # now make sure that phase is a continuous function:
         phase_fac=0.0
         for counter in range(num_points-1):
@@ -459,7 +469,7 @@ def compute_exact_response_func(factors,energies,omega_gs,D_gs,kbT,max_t,num_poi
         for counter in range(num_points):
                 response_func[counter,0]=chi_full[counter,0]
                 response_func[counter,1]=chi_full[counter,1]*cmath.exp(1j*chi_full[counter,2])
-
+        print('Compute exact response func',response_func)
         return response_func
 
 
@@ -487,23 +497,42 @@ def compute_exact_response(temp,omega_gs,omega_ex,max_t,num_steps):
 		for j in range(ex_morse):
 			ex_energies[j]=compute_morse_eval_n(omega_ex,D_ex,j)+E_adiabatic
 			transition_energies[i,j]=transition_energy(i,j)
+	print('EX_Energies',ex_energies)
+	print('Transition Energy',transition_energies)
 	wf_overlaps=LC_func_overlaps(x_range,omega_gs,omega_ex,D_ex,alpha_ex,D_gs,alpha_gs,mu,gs_morse,ex_morse,expansion_number,shift_ex)
 	wf_overlaps_sq=wf_overlaps**2.0
 	exact_response_func=compute_exact_response_func(wf_overlaps_sq,transition_energies,omega_gs,D_gs,kbT,max_t,num_steps)
-	print('lC MORSE OVERLAPS',wf_overlaps_sq)
+	print('LC MORSE OVERLAPS',wf_overlaps_sq)
 	return exact_response_func
 
 
-def compute_total_exact_response(temp,max_t,num_points):
-	total_exact_response_func = compute_exact_response(temp,omega_gs,omega_ex,max_t,num_points)
-	print('Computed response func!')
-	print(total_exact_response_func)
+# def compute_total_exact_response(temp,max_t,num_points):
+# 	total_exact_response_func = compute_exact_response(temp,omega_gs,omega_ex,max_t,num_points)
+# 	print('Computed response func!')
+# 	print(total_exact_response_func)
+# 	for j in range(total_exact_response_func.shape[0]):
+# 		total_exact_response_func[j,1]=total_exact_response_func[j,1]*cmath.exp(-1j*E_adiabatic*total_exact_response_func[j,0])
+# 	
+# 	# shift final response function by the adiabatic energy gap
+# 	for j in range(total_exact_response_func.shape[0]):
+# 		total_exact_response_func[j,1]=total_exact_response_func[j,1]*cmath.exp(-1j*E_adiabatic*total_exact_response_func[j,0])
+# 	return total_exact_response_func
+
+def compute_total_exact_response(temp,max_t,num_steps):
+	for i in range(num_morse_oscillators):
+		exact_response_func=compute_exact_response(temp,omega_gs,omega_ex,max_t,num_steps)
+		print('Computed response func!')
+		print(exact_response_func)
+		if i==0:
+			total_exact_response_func=exact_response_func
+			print('TERF',total_exact_response_func)
+		else:
+			for j in range(total_exact_response_func.shape[0]):
+				total_exact_response_func[j,1]=total_exact_response_func[j,1]*exact_response_func[j,1]
+	# shift final response function by the adiabatic energy gap
 	for j in range(total_exact_response_func.shape[0]):
 		total_exact_response_func[j,1]=total_exact_response_func[j,1]*cmath.exp(-1j*E_adiabatic*total_exact_response_func[j,0])
-	
 	return total_exact_response_func
-
-
 
 def compute_morse_absorption(is_emission,temp,num_points,max_t):
 	# first compute solvent response. This is NOT optional for the Morse oscillator, same
@@ -523,6 +552,6 @@ def compute_morse_absorption(is_emission,temp,num_points,max_t):
 	np.savetxt('Morse_exact_spectrum.dat', spectrum, header='Energy (eV)      Intensity (arb. units)')
 
 
-linear_absorption = compute_morse_absorption(is_emission,temp,num_points,max_t)
+linear_absorption = compute_morse_absorption(False,temp,num_points,max_t)
 
 
