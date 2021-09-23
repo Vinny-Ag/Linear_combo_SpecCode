@@ -95,15 +95,17 @@ def g2_from_corr_func(corr_func_freq,num_steps,max_t):
 
 # evaluate the matrix elements <phi_gs|H_e|phi_gs> for the ground state nuclear wavefunctions acting on the
 # excited state hamiltonian. 
-def gs_wavefunc_He_matrix(num_points,start_point,end_point,D_gs,D_ex,alpha_gs,alpha_ex,shift,mu,E_adiabatic,max_n_gs):
+def gs_wavefunc_He_matrix(x_range,num_points,start_point,end_point,freq_gs,D_gs,D_ex,alpha_gs,alpha_ex,shift,mu,E_adiabatic,max_n_gs,expansion_number):
 	overlap_matrix=np.zeros((max_n_gs,max_n_gs))
 	for i in range(max_n_gs):
 		# compute gs wavefunction and the action of excited state Hamiltonian He on it.
-		func1=compute_wavefunction_n(num_points, start_point,end_point,D_gs,alpha_gs,mu,i,0.0)
+		func1=Linear_combo_wfs(x_range,num_points,start_point,end_point,freq_gs,D_gs,alpha_gs,mu,i,expansion_number,0.0)
+# 		func1=compute_wavefunction_n(num_points, start_point,end_point,D_gs,alpha_gs,mu,i,0.0)
 		He_func1=H_e_on_gs_wavefunc(func1,D_ex,alpha_ex,shift,mu,E_adiabatic)
 		# exploint symmetry
 		for j in range(i,max_n_gs):
-			func2=compute_wavefunction_n(num_points, start_point,end_point,D_gs,alpha_gs,mu,j,0.0)
+			func2=Linear_combo_wfs(x_range,num_points,start_point,end_point,freq_gs,D_gs,alpha_gs,mu,j,expansion_number,0.0)
+# 			func2=compute_wavefunction_n(num_points,start_point,end_point,D_gs,alpha_gs,mu,j,0.0)
 			eff_func=func2[:,1]*He_func1[:,1]
 			overlap_matrix[i,j]=integrate.simps(eff_func,dx=func2[1,0]-func2[0,0])
 			overlap_matrix[j,i]=overlap_matrix[i,j]			
@@ -656,14 +658,14 @@ class morse:
 	
 	def compute_exact_corr_3rd(self,temp,num_points,max_t):
 		kbT=const.kb_in_Ha*temp
-		self.He_mat=gs_wavefunc_He_matrix(self.grid_n_points,self.grid_start,self.grid_end,self.D_gs,self.D_ex,self.alpha_gs,self.alpha_ex,self.K,self.mu,self.E_adiabatic,self.n_max_gs)
+		self.He_mat=gs_wavefunc_He_matrix(self.x_range,self.grid_n_points,self.grid_start,self.grid_end,self.freq_gs,self.D_gs,self.D_ex,self.alpha_gs,self.alpha_ex,self.K,self.mu,self.E_adiabatic,self.n_max_gs,self.expansion_number)
 		self.omega_av_qm= compute_omega_av_qm(self.He_mat,self.freq_gs,self.D_gs,kbT)
 		self.exact_3rd_order_corr=exact_corr_func_3rd(self.He_mat,self.D_gs,self.freq_gs,self.omega_av_qm,kbT,num_points,max_t)
 
 	# Now declare functions of the Morse oscillator 
 	def compute_exact_corr(self,temp,num_points,max_t):
 		kbT=const.kb_in_Ha*temp
-		self.He_mat=gs_wavefunc_He_matrix(self.grid_n_points,self.grid_start,self.grid_end,self.D_gs,self.D_ex,self.alpha_gs,self.alpha_ex,self.K,self.mu,self.E_adiabatic,self.n_max_gs)
+		self.He_mat=gs_wavefunc_He_matrix(self.x_range,self.grid_n_points,self.grid_start,self.grid_end,self.freq_gs,self.D_gs,self.D_ex,self.alpha_gs,self.alpha_ex,self.K,self.mu,self.E_adiabatic,self.n_max_gs,self.expansion_number)
 		self.omega_av_qm= compute_omega_av_qm(self.He_mat,self.freq_gs,self.D_gs,kbT)
 		self.exact_2nd_order_corr=exact_corr_func(self.He_mat,self.D_gs,self.freq_gs,self.omega_av_qm,kbT,num_points,max_t)
 
