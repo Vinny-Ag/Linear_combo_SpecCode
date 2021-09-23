@@ -1,0 +1,11 @@
+Current work in progress:
+
+1) Morse oscillator module
+- FC based linear spectroscopy (harmonic expansion of PES)
+- computing autocorrelation functions (exact and classical)
+- Nonlinear spectroscopy (exact and cumulant based approaches)
+
+2) nonlinear spectroscopy
+- Implement more nonlinear spectroscopy approaches
+
+ 
