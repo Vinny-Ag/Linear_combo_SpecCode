@@ -61,9 +61,9 @@ class params:
         self.herzberg_teller=False
         self.ht_dipole_dipole_only=False # determine whether we do the full HT term or only the dipole-dipole correlation func in cumulant
         self.integration_points_morse=2000
-        self.basis_states=50
         self.max_states_morse_gs=50 # maximum number of states considered in each morse oscillator
         self.max_states_morse_ex=50
+        self.expansion_number=80
         self.t_step_2DES=2.0/const.fs_to_Ha
         self.num_time_samples_2DES=50
         self.temperature=300.0   # temperature in kelvin at which the spectrum was simulated
@@ -144,6 +144,10 @@ class params:
         else:
             self.gs_reference_dipole=False
 
+        par=get_param(filepath, 'EXPANSION_NUMBER')
+        if par!='':
+            self.expansion_number=int(par)
+
         par=get_param(filepath,'VERTICAL_GRADIENT')
         if par=='TRUE':
             self.is_vertical_gradient=True
@@ -161,9 +165,6 @@ class params:
         par=get_param(filepath,'INTEGRATION_POINTS_MORSE')
         if par != '':
             self.integration_points_morse=int(par)
-        par=get_param(filepath,'BASIS_STATES')
-        if par != '':
-            self.basis_states=int(par)
         par=get_param(filepath,'MAX_STATES_MORSE_GS')
         if par != '':
             self.max_states_morse_gs=int(par)
